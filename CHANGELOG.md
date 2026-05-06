@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.2] - *arr Cleanup End-to-End & Completion-Flag Accuracy
+
+### 🐛 Fixed
+
+- **Downloads marked complete at 99.995%** of bytes received. Every normalizer was running progress through `parseFloat((x).toFixed(2))` for display, and the unified item builder then used that rounded value (`progress >= 100`) as the completion oracle. JavaScript's `.toFixed(2)` rounds half-away-from-zero, so e.g. a 100GB aMule file with 5MB still missing (99.9952%) got flipped to `complete=true` — premature `pausedUP` state in the qBit-compat layer, premature shared-vs-active routing in delete/pause handlers. Completion is now sourced per-client from authoritative signals: aMule from bytes-equality on `EC_TAG_PARTFILE_SIZE_DONE` (verified parts only), rTorrent from `d.complete=`, qBittorrent from raw `progress >= 1.0`, Deluge from raw `progress >= 100`, Transmission from `percentDone >= 1.0`. Display `progress` stays at 2-decimal precision; only the completion flag changed.
+- **Transmission `downloaded` counter could exceed total size on poisoned torrents** — the field was being shipped from `downloadedEver`, which Transmission's docs explicitly warn "can grow very large" since it includes redundant re-fetches of corrupt data. Now `haveValid + haveUnchecked` (bytes actually on disk).
+- **Sonarr/Radarr never called `torrents/delete` after import** even after the v3.8.1 `pausedUP` state fix. Tracing Radarr's `QBittorrent.cs:240`: `CanBeRemoved` requires *three* conjuncts — `RemoveCompletedDownloads`, `state ∈ {pausedUP, stoppedUP}`, AND `HasReachedSeedLimit`. We were emitting `ratio_limit: -2` (= "use global config"), which only resolves to true if the user has `MaxRatioEnabled` in qBit's preferences. The compat layer now emits `ratio_limit: 0`, real `ratio` / `uploaded` / `upspeed` values from `EC_TAG_KNOWNFILE_XFERRED_ALL`, so all three conjuncts are satisfied at completion and `*arr` cleanup fires (#42).
+- **`/api/v2/torrents/info` returned `[]` intermittently when no WebSocket clients were connected** — `autoRefreshManager` skips `getBatchData()` entirely when no WS clients are connected (the WS-or-history-due gate), so the cache aged out past the qBit-compat handler's 10s freshness window and the handler shipped empty arrays. The handler now uses a new `DataFetchService.getOrFetchBatchData()` that fetches on cache miss; `getBatchData()` itself is coalesced — concurrent callers (autoRefresh loop + Sonarr/Radarr/Prowlarr polls) share one in-flight fetch instead of triggering parallel client queries (#42).
+
+---
+
 ## [3.8.1] - Logger Hardening, qBittorrent 5.2 Compat & *arr Compat Fixes
 
 ### ♻️ Improved
