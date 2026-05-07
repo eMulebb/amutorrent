@@ -409,16 +409,18 @@ class AutoRefreshManager extends BaseModule {
         const key = itemKey(meta.instanceId, meta.hash);
 
         // Detect external additions (not in database) - only for incomplete downloads
-        if (!knownKeys.has(key) && d.progress < 100) {
+        if (!knownKeys.has(key) && !d.isComplete) {
           this.downloadHistoryDB.addExternalDownload(meta.hash, meta.name, meta.size, manager.clientType, categoryByKey.get(key) || meta.category || null, meta.instanceId);
           knownKeys.add(key);
         }
 
-        // Mark active/completed directly from progress for ALL clients.
-        // (Previously aMule relied on shared files for completion, but with
-        // incremental EC updates, completed downloads stay in the downloads
-        // list at 100% and never appear as new shared files in getUpdate().)
-        if (d.progress >= 100) {
+        // Use the per-client authoritative completion flag set in each normalizer
+        // (bytes-equality for aMule, d.complete= for rTorrent, raw progress fraction
+        // for qBittorrent/Deluge/Transmission) — never re-derive from the rounded
+        // display progress, which can fire 0.005% early on big files and oscillate
+        // around 100, repeatedly flipping completed↔downloading and re-emitting
+        // downloadFinished notifications.
+        if (d.isComplete) {
           completedKeys.add(key);
         } else {
           activeKeys.add(key);
